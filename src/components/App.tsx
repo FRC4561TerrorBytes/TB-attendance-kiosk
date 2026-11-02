@@ -4,7 +4,6 @@ import AttendanceRoster from "./AttendanceRoster";
 import Form from "./Form";
 import Logo from "./Logo";
 import ExportModal from "./ExportModal";
-import Modal from "react-modal";
 import { AdminCodeAction, CurrentAttendanceEntry, EnabledActions } from "../types";
 
 const PROMPT_SCAN = "Tap your NFC sticker on reader or enter PIN";
@@ -16,6 +15,12 @@ const PROMPT_CLOSED = "Attendance closed";
 const PROMPT_CLOSED_EMAIL = "Attendance closed and email sent";
 const PROMPT_EXPORT = "Export reports";
 const PROMPT_USER_NOT_FOUND = "User not Found.";
+const CLOCK_PROMPT_DURATION_MS = 1200;
+const USER_NOT_FOUND_PROMPT_DURATION_MS = 900;
+
+function isClockPromptText(promptText: string) {
+  return / clocked (in|out)$/i.test(promptText) || promptText === PROMPT_SUCCESS;
+}
 
 export default function App() {
   const [isUnlocked, setIsUnlocked] = useState<boolean>(false);
@@ -107,10 +112,10 @@ export default function App() {
     if (lastPromptTime === null) {
       return;
     }
-    const isClockPrompt = /"Clocked" (in|out)$/.test(promptText) || promptText === PROMPT_SUCCESS;
+    const isClockPrompt = isClockPromptText(promptText);
     let timeout: ReturnType<typeof setTimeout> | undefined;
     if (isClockPrompt) {
-      timeout = setTimeout(() => setPromptText(PROMPT_SCAN), 2000);
+      timeout = setTimeout(() => setPromptText(PROMPT_SCAN), CLOCK_PROMPT_DURATION_MS);
     } else if (promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
       timeout = setTimeout(() => setPromptText(PROMPT_LOCKED), 2000);
     } else if (promptText === PROMPT_CLOSE_ERROR) {
@@ -118,7 +123,7 @@ export default function App() {
     } else if (promptText === PROMPT_WRONG_PIN) {
       timeout = setTimeout(() => setPromptText(PROMPT_LOCKED), 10000);
     } else if (promptText === PROMPT_USER_NOT_FOUND) {
-      timeout = setTimeout(() => setPromptText(PROMPT_SCAN), 1200);
+      timeout = setTimeout(() => setPromptText(PROMPT_SCAN), USER_NOT_FOUND_PROMPT_DURATION_MS);
     }
     return () => {
       if (timeout) {
@@ -143,17 +148,18 @@ export default function App() {
   }
 
   let footerClass = "footer";
-  if ((/"Clocked" (in|out)$/.test(promptText) || promptText === PROMPT_SUCCESS) || promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
+  if (isClockPromptText(promptText)) {
+    footerClass += " ok fullscreen-popup";
+  } else if (promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
     footerClass += " ok";
   } else if (promptText === PROMPT_WRONG_PIN || promptText === PROMPT_CLOSE_ERROR) {
     footerClass += " error";
   } else if (promptText === PROMPT_USER_NOT_FOUND) {
-    footerClass += " user-not-found";
+    footerClass += " user-not-found fullscreen-popup";
   }
 
   return (
     <>
-
       {/* HEADER SECTION */}
       <div className="header-container">
         <h1 className="title">TerrorBytes Attendance</h1>

@@ -263,6 +263,19 @@ body, input, button {
   background-color: var(--brand-green) !important; 
 } 
 
+.footer.fullscreen-popup {
+  top: 0 !important;
+  bottom: 0 !important;
+  height: auto !important;
+  padding: 2rem !important;
+}
+
+.footer.fullscreen-popup .prompt {
+  font-size: 4.25rem !important;
+  font-weight: 700 !important;
+  line-height: 1.2 !important;
+}
+
 /* ==========================================
    ADMIN SETTINGS MODAL INTERFACES
    ========================================== */
