@@ -6,7 +6,7 @@ import { AdminCodeAction, TodaysStats, EnabledActions, CurrentAttendanceEntry } 
 declare global {
     interface Window {
         electron: {
-            submit: (idNumber: string) => Promise<{ success: boolean, name?: string }>;
+            submit: (idNumber: string) => Promise<{ success: boolean, name?: string, action?: "in" | "out" }>;
             authorizeAdminCode: (pin: string) => Promise<{ success: boolean, action?: AdminCodeAction }>;
             closeAttendance: () => Promise<{ success: boolean, numClosed: number, emailed: boolean }>;
             getTodaysStats: () => Promise<TodaysStats>;

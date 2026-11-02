@@ -5,7 +5,7 @@ interface FormProps {
   isUnlocked: boolean; 
   isActive: boolean; 
   onAdminCode: (pin: string) => Promise<AdminCodeAction | null>; 
-  onSuccess: (name: string) => void; 
+  onSuccess: (name: string, action: "in" | "out") => void; 
   onUserNotFound?: () => void; 
 } 
 
@@ -114,7 +114,7 @@ export default function Form({ isUnlocked, isActive, onAdminCode, onSuccess, onU
     setValue("");
     
     const clientName = response.name || `ID #${value}`;
-    onSuccess(clientName); 
+    onSuccess(clientName, response.action || "in"); 
   } 
   function handleBlur(e: React.FocusEvent) { 
   // Typecast the generic target as an HTMLInputElement

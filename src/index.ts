@@ -3,8 +3,7 @@ app.disableHardwareAcceleration();
 import * as fs from "fs";
 import * as path from "path";
 import { parse } from "csv-parse";
-import { WebClient } from "@slack/web-api";
-import { App as SlackApp } from "@slack/bolt";
+import type { App as SlackApp } from "@slack/bolt";
 import schedule from "node-schedule";
 import sqlite3 from "sqlite3";
 import { open, Database } from "sqlite";
@@ -117,11 +116,6 @@ async function syncAllAttendanceToGoogleSheets(db: Database) {
 const slackBotToken = process.env.SLACK_BOT_TOKEN || process.env.SLACK_TOKEN;
 const slackAppToken = process.env.SLACK_APP_TOKEN;
 
-let slackClient: WebClient | null = null;
-if (slackBotToken) {
-  slackClient = new WebClient(slackBotToken);
-}
-
 let slackBot: SlackApp | null = null;
 
 type AttendanceEditSession = {
@@ -133,8 +127,20 @@ type AttendanceEditSession = {
 };
 
 const attendanceEditSessions = new Map<string, AttendanceEditSession>();
-if (slackBotToken && slackAppToken) {
-  slackBot = new SlackApp({
+async function initializeSlackBot() {
+  if (!slackBotToken || !slackAppToken) {
+    return;
+  }
+
+  let SlackAppCtor: typeof import("@slack/bolt").App;
+  try {
+    ({ App: SlackAppCtor } = await import("@slack/bolt"));
+  } catch (err) {
+    console.error("Slack Bolt dependency failed to load:", err);
+    return;
+  }
+
+  slackBot = new SlackAppCtor({
     token: slackBotToken,
     appToken: slackAppToken,
     socketMode: true,
@@ -472,6 +478,7 @@ function createWindow(): void {
     width: 1024,
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
+      sandbox: false,
     },
   });
 
@@ -483,6 +490,7 @@ function createWindow(): void {
 }
 app.on("ready", async () => {
   const db = await initDB();
+  await initializeSlackBot();
 
   schedule.scheduleJob("59 23 * * *", async () => {
     try {
@@ -499,12 +507,16 @@ app.on("ready", async () => {
       return { success: false };
     }
 
+    const today = getToday();
+    const checkedInNow = (await getCurrentAttendance(db, today)).some((entry) => entry.idNumber === idNumber);
+    const action: "in" | "out" = checkedInNow ? "out" : "in";
     const nowISO = toISOString(new Date());
     await db.run("INSERT INTO checkin (timestamp, idNumber) VALUES (?, ?)", nowISO, idNumber);
 
     return {
       success: true,
       name: `${student.firstName} ${student.lastName}`,
+      action,
     };
   });
 

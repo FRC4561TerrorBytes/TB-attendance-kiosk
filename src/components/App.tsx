@@ -34,8 +34,8 @@ export default function App() {
     window.electron.getEnabledActions().then(setEnabledActions).catch(console.error);
   }, []);
 
-  function handleSubmit(name?: string) {
-    setPromptText(name ? `${name} clocked in` : PROMPT_SUCCESS);
+  function handleSubmit(name?: string, action: "in" | "out" = "in") {
+    setPromptText(name ? `${name} clocked ${action === "out" ? "out" : "in"}` : PROMPT_SUCCESS);
     setLastPromptTime(new Date());
   }
 
@@ -107,8 +107,9 @@ export default function App() {
     if (lastPromptTime === null) {
       return;
     }
+    const isClockPrompt = /"Clocked" (in|out)$/.test(promptText) || promptText === PROMPT_SUCCESS;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    if (promptText.endsWith("clocked in") || promptText === PROMPT_SUCCESS) {
+    if (isClockPrompt) {
       timeout = setTimeout(() => setPromptText(PROMPT_SCAN), 2000);
     } else if (promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
       timeout = setTimeout(() => setPromptText(PROMPT_LOCKED), 2000);
@@ -142,7 +143,7 @@ export default function App() {
   }
 
   let footerClass = "footer";
-  if (promptText.endsWith("clocked in") || promptText === PROMPT_SUCCESS || promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
+  if ((/"Clocked" (in|out)$/.test(promptText) || promptText === PROMPT_SUCCESS) || promptText.startsWith(PROMPT_CLOSED) || promptText === "Attendance closed via Slack") {
     footerClass += " ok";
   } else if (promptText === PROMPT_WRONG_PIN || promptText === PROMPT_CLOSE_ERROR) {
     footerClass += " error";
@@ -174,10 +175,10 @@ export default function App() {
           {!isUnlocked ? (
             <div className="pin-panel">
               <h2>Admin PIN Required</h2>
-              <Form isUnlocked={false} isActive={true} onAdminCode={handleAdminCode} onSuccess={(name) => { refreshAttendance(); handleSubmit(name); }} onUserNotFound={() => { setPromptText(PROMPT_USER_NOT_FOUND); setLastPromptTime(new Date()); }} />
+              <Form isUnlocked={false} isActive={true} onAdminCode={handleAdminCode} onSuccess={(name, action) => { refreshAttendance(); handleSubmit(name, action); }} onUserNotFound={() => { setPromptText(PROMPT_USER_NOT_FOUND); setLastPromptTime(new Date()); }} />
             </div>
           ) : (
-            <Form isUnlocked={true} isActive={true} onAdminCode={handleAdminCode} onSuccess={(name) => { refreshAttendance(); handleSubmit(name); }} onUserNotFound={() => { setPromptText(PROMPT_USER_NOT_FOUND); setLastPromptTime(new Date()); }} />
+            <Form isUnlocked={true} isActive={true} onAdminCode={handleAdminCode} onSuccess={(name, action) => { refreshAttendance(); handleSubmit(name, action); }} onUserNotFound={() => { setPromptText(PROMPT_USER_NOT_FOUND); setLastPromptTime(new Date()); }} />
           )}
         </div>
       </div>
