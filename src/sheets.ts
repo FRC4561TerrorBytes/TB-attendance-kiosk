@@ -21,7 +21,6 @@ async function getSheetsClient() {
     );
   }
 
-  // Handle escaped newline characters safely in the private key
   credentials.private_key = credentials.private_key.replace(/\\n/g, "\n");
 
   const auth = new google.auth.GoogleAuth({
@@ -86,21 +85,17 @@ function normalizeSheetValue(value: unknown, columnIndex: number): string {
   const text = String(value ?? "").trim();
 
   if (text === "") return "";
-
-  // Normalize names so minor casing differences don't cause duplicate uploads.
   if (columnIndex === 0 || columnIndex === 1) {
     return text.toLowerCase();
   }
 
-  // Google Sheets may return actual dates as serial numbers when
-  // UNFORMATTED_VALUE is requested, while CSV input uses YYYY-MM-DD.
+  
   if (columnIndex === 2) {
     if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
       const [year, month, day] = text.split("-").map(Number);
       const utcMillis = Date.UTC(year, month - 1, day);
       const parsed = new Date(utcMillis);
 
-      // Only convert valid calendar dates.
       if (
         parsed.getUTCFullYear() === year &&
         parsed.getUTCMonth() === month - 1 &&
@@ -119,7 +114,6 @@ function normalizeSheetValue(value: unknown, columnIndex: number): string {
     return `date-text:${text}`;
   }
 
-  // Normalize hours such as "1.20" and 1.2 to the same key.
   if (columnIndex === 3) {
     const numericHours = Number(text);
     if (Number.isFinite(numericHours)) {
@@ -160,7 +154,6 @@ export async function uploadReportsToSheet(
     values = hasHeader ? checkinInput.slice(1) : checkinInput;
   }
 
-  // Ignore empty rows and require the four expected rawData columns.
   values = values.filter(
     (row) =>
       row.length >= 4 &&
@@ -171,8 +164,6 @@ export async function uploadReportsToSheet(
 
   if (values.length === 0) return;
 
-  // Read existing rawData rows. This lets us locate the checkpoint and
-  // provides the complete duplicate-check fallback if it cannot be found.
   const existingResult = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: "rawData!A2:D",
@@ -181,7 +172,6 @@ export async function uploadReportsToSheet(
 
   const existingRows = existingResult.data.values || [];
 
-  // Locate the last non-empty row returned by Sheets.
   let lastExistingIndex = -1;
 
   for (let i = existingRows.length - 1; i >= 0; i--) {
@@ -200,15 +190,12 @@ export async function uploadReportsToSheet(
   let fallbackMode = false;
 
   if (lastExistingIndex === -1) {
-    // The sheet has no attendance records yet: this is the initial sync.
     candidateRows = values;
   } else {
     const checkpointKey = makeAttendanceKey(
       existingRows[lastExistingIndex]
     );
 
-    // Find the last sheet record in the incoming history.
-    // Search backwards in case an identical row occurs more than once.
     let checkpointIndex = -1;
 
     for (let i = values.length - 1; i >= 0; i--) {
@@ -219,15 +206,13 @@ export async function uploadReportsToSheet(
     }
 
     if (checkpointIndex !== -1) {
-      // Normal incremental path: only process records after the checkpoint.
+
       candidateRows = values.slice(checkpointIndex + 1);
 
       console.log(
         `Google Sheets checkpoint found at incoming row ${checkpointIndex + 1}.`
       );
     } else {
-      // Safe fallback: never assume the whole incoming history is new.
-      // Check it against existing sheet records before appending.
       fallbackMode = true;
       candidateRows = values;
 
@@ -242,8 +227,6 @@ export async function uploadReportsToSheet(
     ? new Set(existingRows.map((row: any[]) => makeAttendanceKey(row)))
     : new Set<string>();
 
-  // Filter duplicates from the selected batch as well as duplicate rows
-  // within that batch. Do not modify existing sheet rows.
   const newValues: any[][] = [];
 
   for (const row of candidateRows) {
@@ -262,7 +245,6 @@ export async function uploadReportsToSheet(
     return;
   }
 
-  // Append only. Never overwrite or clear previously synced attendance.
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
     range: "rawData!A1:D",
