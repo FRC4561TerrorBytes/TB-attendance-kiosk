@@ -177,6 +177,7 @@ async function initializeSlackBot() {
       const now = new Date();
       const nowISO = toISOString(now);
 
+      let totalTeamMinutes = 0;
       const attendeeLines = currentAttendance.map((attendee: any) => {
         const checkInTime = new Date(
           attendee.checkinTime || attendee.timestamp
@@ -184,6 +185,7 @@ async function initializeSlackBot() {
 
         const diffMs = now.getTime() - checkInTime.getTime();
         const totalMinutes = Math.floor(diffMs / (1000 * 60));
+        totalTeamMinutes += totalMinutes;
 
         const hours = Math.floor(totalMinutes / 60);
         const mins = totalMinutes % 60;
@@ -206,10 +208,14 @@ async function initializeSlackBot() {
       });
 
       if (param === "close") {
+        const totalTeamHours = Math.floor(totalTeamMinutes / 60);
+        const remainingTeamMinutes = totalTeamMinutes % 60;
+
         const messageText =
           `📋 *Meeting Attendance Summary Report*\n` +
           `*Attendance Status:* Closed\n` +
-          `*Total Attendees Checked Out:* ${currentAttendance.length}\n\n` +
+          `*Total Attendees Checked Out:* ${currentAttendance.length}\n` +
+          `*Total Team Hours:* ${totalTeamHours}h ${remainingTeamMinutes}m\n\n` +
           attendeeLines.join("\n");
 
         /*
