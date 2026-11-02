@@ -82,7 +82,64 @@ function csvToValues(csv: string, stripHeader = false): any[][] {
   }
 }
 
-export async function uploadReportsToSheet(checkinInput: string | string[][]) {
+function normalizeSheetValue(value: unknown, columnIndex: number): string {
+  const text = String(value ?? "").trim();
+
+  if (text === "") return "";
+
+  // Normalize names so minor casing differences don't cause duplicate uploads.
+  if (columnIndex === 0 || columnIndex === 1) {
+    return text.toLowerCase();
+  }
+
+  // Google Sheets may return actual dates as serial numbers when
+  // UNFORMATTED_VALUE is requested, while CSV input uses YYYY-MM-DD.
+  if (columnIndex === 2) {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+      const [year, month, day] = text.split("-").map(Number);
+      const utcMillis = Date.UTC(year, month - 1, day);
+      const parsed = new Date(utcMillis);
+
+      // Only convert valid calendar dates.
+      if (
+        parsed.getUTCFullYear() === year &&
+        parsed.getUTCMonth() === month - 1 &&
+        parsed.getUTCDate() === day
+      ) {
+        const serial = utcMillis / 86400000 + 25569;
+        return `date:${serial}`;
+      }
+    }
+
+    const numericDate = Number(text);
+    if (Number.isFinite(numericDate)) {
+      return `date:${numericDate}`;
+    }
+
+    return `date-text:${text}`;
+  }
+
+  // Normalize hours such as "1.20" and 1.2 to the same key.
+  if (columnIndex === 3) {
+    const numericHours = Number(text);
+    if (Number.isFinite(numericHours)) {
+      return `hours:${numericHours}`;
+    }
+  }
+
+  return text;
+}
+
+function makeAttendanceKey(row: unknown[]): string {
+  return [0, 1, 2, 3]
+    .map((columnIndex) => normalizeSheetValue(row[columnIndex], columnIndex))
+    .join("\x1F");
+}
+
+export async function uploadReportsToSheet(
+  checkinInput: string | string[][]
+) 
+{
   const { sheets, sheetId } = await getSheetsClient();
   await ensureRawDataSheetExists(sheets, sheetId);
 
@@ -93,7 +150,7 @@ export async function uploadReportsToSheet(checkinInput: string | string[][]) {
   if (typeof checkinInput === "string") {
     if (checkinInput.trim().length === 0) return;
     values = csvToValues(checkinInput, true);
-  } else if (Array.isArray(checkinInput)) {
+  } else {
     if (checkinInput.length === 0) return;
 
     const hasHeader =
@@ -103,44 +160,112 @@ export async function uploadReportsToSheet(checkinInput: string | string[][]) {
     values = hasHeader ? checkinInput.slice(1) : checkinInput;
   }
 
+  // Ignore empty rows and require the four expected rawData columns.
+  values = values.filter(
+    (row) =>
+      row.length >= 4 &&
+      [0, 1, 2, 3].some(
+        (columnIndex) => String(row[columnIndex] ?? "").trim() !== ""
+      )
+  );
+
   if (values.length === 0) return;
 
-  // Read existing rawData records
+  // Read existing rawData rows. This lets us locate the checkpoint and
+  // provides the complete duplicate-check fallback if it cannot be found.
   const existingResult = await sheets.spreadsheets.values.get({
     spreadsheetId: sheetId,
     range: "rawData!A2:D",
+    valueRenderOption: "UNFORMATTED_VALUE",
   });
 
   const existingRows = existingResult.data.values || [];
 
-  // Create a unique key from the four rawData columns
-  const makeKey = (row: any[]) =>
-    row.map(value => String(value ?? "").trim()).join("\x1F");
+  // Locate the last non-empty row returned by Sheets.
+  let lastExistingIndex = -1;
 
-  const existingKeys = new Set(
-    existingRows.map(makeKey)
-  );
+  for (let i = existingRows.length - 1; i >= 0; i--) {
+    if (
+      [0, 1, 2, 3].some(
+        (columnIndex) =>
+          String(existingRows[i][columnIndex] ?? "").trim() !== ""
+      )
+    ) {
+      lastExistingIndex = i;
+      break;
+    }
+  }
 
-  // Only upload rows that aren't already in rawData
-  const newValues = values.filter(row => {
-    const key = makeKey(row);
+  let candidateRows: any[][] = [];
+  let fallbackMode = false;
+
+  if (lastExistingIndex === -1) {
+    // The sheet has no attendance records yet: this is the initial sync.
+    candidateRows = values;
+  } else {
+    const checkpointKey = makeAttendanceKey(
+      existingRows[lastExistingIndex]
+    );
+
+    // Find the last sheet record in the incoming history.
+    // Search backwards in case an identical row occurs more than once.
+    let checkpointIndex = -1;
+
+    for (let i = values.length - 1; i >= 0; i--) {
+      if (makeAttendanceKey(values[i]) === checkpointKey) {
+        checkpointIndex = i;
+        break;
+      }
+    }
+
+    if (checkpointIndex !== -1) {
+      // Normal incremental path: only process records after the checkpoint.
+      candidateRows = values.slice(checkpointIndex + 1);
+
+      console.log(
+        `Google Sheets checkpoint found at incoming row ${checkpointIndex + 1}.`
+      );
+    } else {
+      // Safe fallback: never assume the whole incoming history is new.
+      // Check it against existing sheet records before appending.
+      fallbackMode = true;
+      candidateRows = values;
+
+      console.warn(
+        "Google Sheets checkpoint was not found in incoming history. " +
+        "Using full duplicate checking for this sync."
+      );
+    }
+  }
+
+  const existingKeys = fallbackMode
+    ? new Set(existingRows.map((row: any[]) => makeAttendanceKey(row)))
+    : new Set<string>();
+
+  // Filter duplicates from the selected batch as well as duplicate rows
+  // within that batch. Do not modify existing sheet rows.
+  const newValues: any[][] = [];
+
+  for (const row of candidateRows) {
+    const key = makeAttendanceKey(row);
 
     if (existingKeys.has(key)) {
-      return false;
+      continue;
     }
 
     existingKeys.add(key);
-    return true;
-  });
+    newValues.push(row.slice(0, 4));
+  }
 
   if (newValues.length === 0) {
     console.log("Google Sheets already contains all attendance data.");
     return;
   }
 
+  // Append only. Never overwrite or clear previously synced attendance.
   await sheets.spreadsheets.values.append({
     spreadsheetId: sheetId,
-    range: "rawData!A1",
+    range: "rawData!A1:D",
     valueInputOption: "USER_ENTERED",
     insertDataOption: "INSERT_ROWS",
     requestBody: {
@@ -149,6 +274,7 @@ export async function uploadReportsToSheet(checkinInput: string | string[][]) {
   });
 
   console.log(
-    `Google Sheets sync complete: ${newValues.length} new rows uploaded.`
+    `Google Sheets sync complete: ${newValues.length} new rows uploaded` +
+    (fallbackMode ? " (fallback duplicate check)." : " (incremental sync).")
   );
 }
